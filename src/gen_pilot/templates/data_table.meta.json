@@ -1,0 +1,21 @@
+{
+  "name": "data_table",
+  "format": "html",
+  "file": "data_table.html.j2",
+  "description": "Styled HTML table from structured data. Columns are auto-detected from the first row or specified explicitly.",
+  "variables": ["title", "columns", "rows", "description", "footer"],
+  "schema": {
+    "type": "object",
+    "required": ["title", "columns", "rows"],
+    "properties": {
+      "title": {"type": "string"},
+      "description": {"type": "string"},
+      "footer": {"type": "string"},
+      "columns": {"type": "array", "items": {"type": "string"}},
+      "rows": {
+        "type": "array",
+        "items": {"type": "object"}
+      }
+    }
+  }
+}

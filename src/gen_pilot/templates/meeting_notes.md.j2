@@ -1,0 +1,43 @@
+# {{ title }}
+
+**Date:** {{ date }}
+**Attendees:** {{ attendees | join(", ") }}
+{% if facilitator %}**Facilitator:** {{ facilitator }}{% endif %}
+
+---
+
+## Agenda
+
+{% for item in agenda %}
+{{ loop.index }}. {{ item }}
+{% endfor %}
+
+## Discussion
+
+{% for item in discussion %}
+### {{ item.topic }}
+
+{{ item.notes }}
+
+{% if item.decisions %}
+**Decisions:**
+{% for d in item.decisions %}
+- {{ d }}
+{% endfor %}
+{% endif %}
+
+{% endfor %}
+
+## Action Items
+
+| # | Action | Owner | Due |
+|---|--------|-------|-----|
+{% for action in action_items %}
+| {{ loop.index }} | {{ action.task }} | {{ action.owner }} | {{ action.due }} |
+{% endfor %}
+
+{% if next_meeting %}
+---
+
+**Next meeting:** {{ next_meeting }}
+{% endif %}

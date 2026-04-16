@@ -1,0 +1,32 @@
+# {{ title }}
+
+{{ description }}
+
+**Author:** {{ author }}
+**Date:** {{ date }}
+{% if version %}**Version:** {{ version }}{% endif %}
+
+---
+
+{% for section in sections %}
+## {{ section.title }}
+
+{{ section.body }}
+
+{% if section.code_blocks %}
+{% for block in section.code_blocks %}
+```{{ block.language }}
+{{ block.code }}
+```
+{% endfor %}
+{% endif %}
+
+{% endfor %}
+
+{% if appendix %}
+---
+
+## Appendix
+
+{{ appendix }}
+{% endif %}

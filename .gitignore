@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environment
+.venv/
+
+# Testing & tools
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*~
+
+# Runtime state (gen-pilot & resilient-write)
+.gen_pilot/
+.resilient_write/
+
+# LaTeX build artifacts (keep .bbl for arxiv)
+paper/*.aux
+paper/*.log
+paper/*.blg
+paper/*.out
+paper/*.toc
+paper/*.pdf
+paper/*.zip
+
+# OS
+.DS_Store
+Thumbs.db

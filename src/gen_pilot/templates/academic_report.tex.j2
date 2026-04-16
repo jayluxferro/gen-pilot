@@ -1,0 +1,41 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{geometry}
+\geometry{margin=1in}
+\usepackage{booktabs}
+\usepackage{hyperref}
+
+\title{\VAR{title}}
+\author{\VAR{author}}
+\date{\VAR{date}}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\VAR{abstract}
+\end{abstract}
+
+\BLOCK{for section in sections}
+\section{\VAR{section.title}}
+\VAR{section.body}
+
+\BLOCK{if section.subsections}
+\BLOCK{for sub in section.subsections}
+\subsection{\VAR{sub.title}}
+\VAR{sub.body}
+\BLOCK{endfor}
+\BLOCK{endif}
+
+\BLOCK{endfor}
+
+\BLOCK{if references}
+\begin{thebibliography}{99}
+\BLOCK{for ref in references}
+\bibitem{\VAR{ref.key}} \VAR{ref.text}
+\BLOCK{endfor}
+\end{thebibliography}
+\BLOCK{endif}
+
+\end{document}

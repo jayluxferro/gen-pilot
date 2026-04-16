@@ -1,0 +1,41 @@
+{
+  "name": "technical_doc",
+  "format": "markdown",
+  "file": "technical_doc.md.j2",
+  "description": "Technical documentation with sections, optional code blocks, and appendix. Suitable for API docs, design docs, and READMEs.",
+  "variables": ["title", "description", "author", "date", "sections", "version", "appendix"],
+  "schema": {
+    "type": "object",
+    "required": ["title", "description", "author", "date", "sections"],
+    "properties": {
+      "title": {"type": "string"},
+      "description": {"type": "string"},
+      "author": {"type": "string"},
+      "date": {"type": "string"},
+      "version": {"type": "string"},
+      "appendix": {"type": "string"},
+      "sections": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": ["title", "body"],
+          "properties": {
+            "title": {"type": "string"},
+            "body": {"type": "string"},
+            "code_blocks": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["language", "code"],
+                "properties": {
+                  "language": {"type": "string"},
+                  "code": {"type": "string"}
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

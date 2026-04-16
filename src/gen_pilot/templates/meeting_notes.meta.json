@@ -1,0 +1,43 @@
+{
+  "name": "meeting_notes",
+  "format": "markdown",
+  "file": "meeting_notes.md.j2",
+  "description": "Meeting notes with agenda, discussion topics, decisions, and action items.",
+  "variables": ["title", "date", "attendees", "facilitator", "agenda", "discussion", "action_items", "next_meeting"],
+  "schema": {
+    "type": "object",
+    "required": ["title", "date", "attendees", "agenda", "discussion", "action_items"],
+    "properties": {
+      "title": {"type": "string"},
+      "date": {"type": "string"},
+      "attendees": {"type": "array", "items": {"type": "string"}},
+      "facilitator": {"type": "string"},
+      "next_meeting": {"type": "string"},
+      "agenda": {"type": "array", "items": {"type": "string"}},
+      "discussion": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": ["topic", "notes"],
+          "properties": {
+            "topic": {"type": "string"},
+            "notes": {"type": "string"},
+            "decisions": {"type": "array", "items": {"type": "string"}}
+          }
+        }
+      },
+      "action_items": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": ["task", "owner", "due"],
+          "properties": {
+            "task": {"type": "string"},
+            "owner": {"type": "string"},
+            "due": {"type": "string"}
+          }
+        }
+      }
+    }
+  }
+}

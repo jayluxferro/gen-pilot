@@ -1,0 +1,50 @@
+{
+  "name": "academic_report",
+  "format": "latex",
+  "file": "academic_report.tex.j2",
+  "description": "Academic report with sections, subsections, and bibliography. Suitable for evaluation reports, research summaries, and technical papers.",
+  "variables": ["title", "author", "date", "abstract", "sections", "references"],
+  "schema": {
+    "type": "object",
+    "required": ["title", "author", "date", "abstract", "sections"],
+    "properties": {
+      "title": {"type": "string"},
+      "author": {"type": "string"},
+      "date": {"type": "string"},
+      "abstract": {"type": "string"},
+      "sections": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": ["title", "body"],
+          "properties": {
+            "title": {"type": "string"},
+            "body": {"type": "string"},
+            "subsections": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["title", "body"],
+                "properties": {
+                  "title": {"type": "string"},
+                  "body": {"type": "string"}
+                }
+              }
+            }
+          }
+        }
+      },
+      "references": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": ["key", "text"],
+          "properties": {
+            "key": {"type": "string"},
+            "text": {"type": "string"}
+          }
+        }
+      }
+    }
+  }
+}
