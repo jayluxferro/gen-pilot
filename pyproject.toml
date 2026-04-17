@@ -41,8 +41,8 @@ dev = [
 gen-pilot = "gen_pilot.server:main"
 
 [project.urls]
-Homepage = "https://github.com/sperixlabs/gen-pilot"
-Repository = "https://github.com/sperixlabs/gen-pilot"
+Homepage = "https://github.com/jayluxferro/gen-pilot"
+Repository = "https://github.com/jayluxferro/gen-pilot"
 
 [dependency-groups]
 dev = [

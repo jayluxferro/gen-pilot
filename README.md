@@ -49,7 +49,7 @@ gen-pilot provides three layers of tools:
 uv pip install gen-pilot
 
 # Or from source
-git clone https://github.com/sperixlabs/gen-pilot
+git clone https://github.com/jayluxferro/gen-pilot
 cd gen-pilot
 uv sync
 ```
@@ -84,7 +84,7 @@ Born from a real incident where an agent burned ~50K tokens producing empty resp
 
 ## Related
 
-- [resilient-write](https://github.com/sperixlabs/resilient-write) — Durable file I/O layer (complementary to gen-pilot)
+- [resilient-write](https://github.com/jayluxferro/resilient-write) — Durable file I/O layer (complementary to gen-pilot)
 - [MCP Specification](https://modelcontextprotocol.io) — The protocol gen-pilot implements
 
 ## License
