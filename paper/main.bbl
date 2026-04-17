@@ -166,6 +166,12 @@ Hugo Touvron, Louis Martin, Kevin Stone, Peter Albert, Amjad Almahairi, Yasmine
 \newblock {Llama 2}: Open foundation and fine-tuned chat models.
 \newblock {\em arXiv preprint arXiv:2307.09288}, 2023.
 
+\bibitem{vaswani2017attention}
+Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones,
+  Aidan~N Gomez, {\L}ukasz Kaiser, and Illia Polosukhin.
+\newblock Attention is all you need.
+\newblock {\em Advances in Neural Information Processing Systems}, 30, 2017.
+
 \bibitem{wang2024survey}
 Lei Wang, Chen Ma, Xueyang Feng, Zeyu Zhang, Hao Yang, Jingsen Zhang, Zhiyuan
   Chen, Jiakai Tang, Xu~Chen, Yankai Lin, et~al.

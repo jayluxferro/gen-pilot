@@ -39,3 +39,6 @@ paper/*.zip
 # OS
 .DS_Store
 Thumbs.db
+
+# Misc
+git-push
