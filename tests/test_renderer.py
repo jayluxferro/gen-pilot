@@ -165,6 +165,10 @@ class TestGpRenderResilientWrite:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """use_rw=True should write via resilient-write safe_write."""
+        try:
+            import resilient_write  # noqa: F401
+        except ImportError:
+            pytest.skip("resilient-write not installed")
         # resilient-write requires workspace-relative paths,
         # so set cwd to tmp_path for this test
         monkeypatch.chdir(tmp_path)

@@ -389,11 +389,10 @@ class TestGpReplan:
         assert result["ok"] is False
         assert "exceeds maximum" in result["error"]
 
-    def test_replan_uses_config_multipliers(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_replan_uses_config_multipliers(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """Replan should use get_multipliers() which respects config overrides."""
-        from gen_pilot.tools import planner
-
-        # Verify planner calls get_multipliers (not the constant)
         original = create_plan(
             description="Report",
             target_format="markdown",
@@ -413,7 +412,7 @@ class TestGpReplan:
 
     def test_plan_gc_limits_files(self) -> None:
         """Plan garbage collection should limit the number of plan files."""
-        from gen_pilot.tools.planner import _plans_dir, _MAX_PLAN_FILES
+        from gen_pilot.tools.planner import _MAX_PLAN_FILES, _plans_dir
 
         # Create more plans than the limit
         for i in range(_MAX_PLAN_FILES + 10):
