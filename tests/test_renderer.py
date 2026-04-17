@@ -51,6 +51,20 @@ class TestGpRegisterTemplate:
         assert result["ok"] is True
         assert "new_var" in result["variables"]
 
+    def test_latex_variable_extraction_with_loops(self) -> None:
+        """LaTeX templates with loops should extract top-level iterables, not loop vars."""
+        content = (
+            r"\documentclass{article}\begin{document}"
+            r"\BLOCK{for item in items}\VAR{item.name}\BLOCK{endfor}"
+            r"\VAR{title}\end{document}"
+        )
+        result = register_template(name="latex_loop", content=content, fmt="latex")
+        assert result["ok"] is True
+        assert "items" in result["variables"]
+        assert "title" in result["variables"]
+        # "item" is a loop variable, not a top-level variable
+        assert "item" not in result["variables"]
+
     def test_schema_validation(self) -> None:
         """If schema is provided, it should be stored and returned."""
         schema = {"type": "object", "properties": {"title": {"type": "string"}}}
@@ -225,3 +239,150 @@ class TestGpListTemplates:
         assert "tpl_b" in names
         # Builtins still present
         assert "academic_report" in names
+
+    def test_list_templates_includes_schema(self) -> None:
+        """list_templates should include schema for templates that have one."""
+        schema = {
+            "type": "object",
+            "required": ["title"],
+            "properties": {"title": {"type": "string"}},
+        }
+        register_template(
+            name="schema_test",
+            content="{{ title }}",
+            fmt="text",
+            schema=schema,
+        )
+        result = list_templates()
+        tpl = next(t for t in result["templates"] if t["name"] == "schema_test")
+        assert tpl["schema"] == schema
+
+    def test_builtin_templates_include_schema(self) -> None:
+        """Builtin templates should include their schema in list_templates."""
+        result = list_templates()
+        academic = next(
+            t for t in result["templates"] if t["name"] == "academic_report"
+        )
+        assert academic["schema"] is not None
+        assert "properties" in academic["schema"]
+        assert "sections" in academic["schema"]["properties"]
+
+
+class TestGpRenderWhitespace:
+    """Tests for Jinja2 whitespace trimming."""
+
+    def test_no_extra_blank_lines_in_loops(self, tmp_path: Path) -> None:
+        """Rendered output should not have extra blank lines from Jinja2 blocks."""
+        content = "Items:\n{% for item in items %}\n- {{ item }}\n{% endfor %}\nDone."
+        register_template(name="ws_test", content=content, fmt="text")
+        output = tmp_path / "ws.txt"
+        result = render_template(
+            template="ws_test",
+            data={"items": ["a", "b"]},
+            output_path=str(output),
+        )
+        assert result["ok"] is True
+        text = output.read_text()
+        # trim_blocks should remove the newline after block tags
+        assert "\n\n\n" not in text
+
+
+class TestGpRenderBuiltinTemplates:
+    """Tests for rendering builtin templates with optional fields omitted."""
+
+    def test_academic_report_without_optional_fields(self, tmp_path: Path) -> None:
+        """academic_report should render without subsections or references."""
+        from gen_pilot.templates import get_builtin_template
+
+        builtin = get_builtin_template("academic_report")
+        assert builtin is not None
+        content, meta = builtin
+        register_template(
+            name="academic_report",
+            content=content,
+            fmt=meta["format"],
+        )
+        output = tmp_path / "report.tex"
+        result = render_template(
+            template="academic_report",
+            data={
+                "title": "Test",
+                "author": "Author",
+                "date": "2026",
+                "abstract": "An abstract.",
+                "sections": [{"title": "Intro", "body": "Hello world."}],
+            },
+            output_path=str(output),
+        )
+        assert result["ok"] is True
+        text = output.read_text()
+        assert "Test" in text
+        assert "Hello world." in text
+
+
+class TestGpSecurityGuards:
+    """Tests for security hardening."""
+
+    def test_html_auto_escapes_xss(self, tmp_path: Path) -> None:
+        """HTML templates should auto-escape data to prevent XSS."""
+        register_template(
+            name="html_xss",
+            content="<p>{{ content }}</p>",
+            fmt="html",
+        )
+        output = tmp_path / "xss.html"
+        result = render_template(
+            template="html_xss",
+            data={"content": "<script>alert('xss')</script>"},
+            output_path=str(output),
+        )
+        assert result["ok"] is True
+        text = output.read_text()
+        assert "<script>" not in text
+        assert "&lt;script&gt;" in text
+
+    def test_path_traversal_rejected(self) -> None:
+        """Template name with '..' should be rejected."""
+        result = register_template(
+            name="../escape", content="{{ x }}", fmt="text"
+        )
+        assert result["ok"] is False
+        assert ".." in result["error"]
+
+    def test_slash_in_name_rejected(self) -> None:
+        """Template name with '/' should be rejected."""
+        result = register_template(
+            name="sub/dir", content="{{ x }}", fmt="text"
+        )
+        assert result["ok"] is False
+        assert "/" in result["error"]
+
+    def test_empty_name_rejected(self) -> None:
+        """Empty template name should be rejected."""
+        result = register_template(name="", content="{{ x }}", fmt="text")
+        assert result["ok"] is False
+
+    def test_render_path_traversal_rejected(self, tmp_path: Path) -> None:
+        """Rendering with traversal name should be rejected."""
+        result = render_template(
+            template="../escape",
+            data={"x": 1},
+            output_path=str(tmp_path / "out.txt"),
+        )
+        assert result["ok"] is False
+        assert ".." in result["error"]
+
+    def test_sandbox_blocks_class_access(self, tmp_path: Path) -> None:
+        """SandboxedEnvironment should block Python class introspection."""
+        register_template(
+            name="ssti_test",
+            content="{{ [].__class__.__bases__ }}",
+            fmt="text",
+        )
+        result = render_template(
+            template="ssti_test",
+            data={},
+            output_path=str(tmp_path / "out.txt"),
+        )
+        assert result["ok"] is False
+        assert "security" in result["error"].lower() or "unsafe" in result["error"].lower()

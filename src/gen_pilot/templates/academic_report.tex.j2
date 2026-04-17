@@ -21,7 +21,7 @@
 \section{\VAR{section.title}}
 \VAR{section.body}
 
-\BLOCK{if section.subsections}
+\BLOCK{if section.subsections is defined and section.subsections}
 \BLOCK{for sub in section.subsections}
 \subsection{\VAR{sub.title}}
 \VAR{sub.body}
@@ -30,7 +30,7 @@
 
 \BLOCK{endfor}
 
-\BLOCK{if references}
+\BLOCK{if references is defined and references}
 \begin{thebibliography}{99}
 \BLOCK{for ref in references}
 \bibitem{\VAR{ref.key}} \VAR{ref.text}

@@ -12,7 +12,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import re
 import subprocess
 import tempfile
 from datetime import UTC, datetime
@@ -21,24 +20,20 @@ from typing import Any
 
 import jinja2
 import jinja2.meta
+from jinja2.sandbox import SandboxedEnvironment
 from mcp.types import Tool
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
+MAX_RENDER_BYTES = 10 * 1024 * 1024  # 10 MB
+
 FORMAT_EXTENSIONS: dict[str, str] = {
     "latex": ".tex.j2",
     "markdown": ".md.j2",
     "html": ".html.j2",
     "text": ".txt.j2",
-}
-
-RENDERED_EXTENSIONS: dict[str, str] = {
-    "latex": ".tex",
-    "markdown": ".md",
-    "html": ".html",
-    "text": ".txt",
 }
 
 # ---------------------------------------------------------------------------
@@ -66,15 +61,20 @@ def _template_path(name: str, fmt: str) -> Path:
 # Variable extraction from Jinja2 source
 # ---------------------------------------------------------------------------
 
-_VAR_RE = re.compile(r"\{\{[\s]*(\w+)")
-
-
 def _extract_variables(content: str, fmt: str = "text") -> list[str]:
     """Extract top-level variable names from Jinja2 template source."""
     if fmt == "latex":
-        # LaTeX templates use \VAR{...} delimiters — use regex
-        return sorted(set(re.findall(r"\\VAR\{(\w+)", content)))
-    env = jinja2.Environment()
+        # LaTeX templates use custom delimiters — parse with matching Environment
+        env = SandboxedEnvironment(
+            block_start_string="\\BLOCK{",
+            block_end_string="}",
+            variable_start_string="\\VAR{",
+            variable_end_string="}",
+            comment_start_string="\\#{",
+            comment_end_string="}",
+        )
+    else:
+        env = SandboxedEnvironment()
     ast = env.parse(content)
     variables = sorted(jinja2.meta.find_undeclared_variables(ast))
     return variables
@@ -85,6 +85,15 @@ def _extract_variables(content: str, fmt: str = "text") -> list[str]:
 # ---------------------------------------------------------------------------
 
 
+def _validate_template_name(name: str) -> str | None:
+    """Return error message if name is invalid, None if OK."""
+    if not name or name != name.strip():
+        return "Template name must be non-empty with no leading/trailing whitespace."
+    if ".." in name or "/" in name or "\\" in name or "\0" in name:
+        return "Template name must not contain '..', '/', '\\', or null bytes."
+    return None
+
+
 def register_template(
     name: str,
     content: str,
@@ -93,6 +102,8 @@ def register_template(
     description: str | None = None,
 ) -> dict[str, Any]:
     """Register a Jinja2 template and persist it to disk."""
+    if err := _validate_template_name(name):
+        return {"ok": False, "error": f"Invalid template name '{name}': {err}"}
     tpl_path = _template_path(name, fmt)
     tpl_path.write_text(content, encoding="utf-8")
 
@@ -135,6 +146,8 @@ def render_template(
     writes with journaling. Falls back to built-in atomic write if
     resilient-write is not installed.
     """
+    if err := _validate_template_name(template):
+        return {"ok": False, "error": f"Invalid template name '{template}': {err}"}
     meta_file = _meta_path(template)
     if not meta_file.exists():
         # Try loading from builtins
@@ -170,19 +183,32 @@ def render_template(
 
     tpl_content = tpl_path.read_text(encoding="utf-8")
 
-    # Configure Jinja2 environment — use different delimiters for LaTeX
+    # Configure sandboxed Jinja2 environment — prevents SSTI attacks
     if fmt == "latex":
-        env = jinja2.Environment(
+        env = SandboxedEnvironment(
             block_start_string="\\BLOCK{",
             block_end_string="}",
             variable_start_string="\\VAR{",
             variable_end_string="}",
             comment_start_string="\\#{",
             comment_end_string="}",
+            trim_blocks=True,
+            lstrip_blocks=True,
+            undefined=jinja2.StrictUndefined,
+        )
+    elif fmt == "html":
+        env = SandboxedEnvironment(
+            autoescape=True,
+            trim_blocks=True,
+            lstrip_blocks=True,
             undefined=jinja2.StrictUndefined,
         )
     else:
-        env = jinja2.Environment(undefined=jinja2.StrictUndefined)
+        env = SandboxedEnvironment(
+            trim_blocks=True,
+            lstrip_blocks=True,
+            undefined=jinja2.StrictUndefined,
+        )
 
     try:
         tpl = env.from_string(tpl_content)
@@ -193,8 +219,19 @@ def render_template(
         rendered = tpl.render(**data)
     except jinja2.UndefinedError as e:
         return {"ok": False, "error": f"Missing template variable: {e}"}
+    except jinja2.exceptions.SecurityError as e:
+        return {"ok": False, "error": f"Template security violation: {e}"}
 
     rendered_bytes = len(rendered.encode("utf-8"))
+    if rendered_bytes > MAX_RENDER_BYTES:
+        return {
+            "ok": False,
+            "error": (
+                f"Rendered output too large ({rendered_bytes:,} bytes, "
+                f"limit {MAX_RENDER_BYTES:,} bytes). "
+                "Consider splitting into smaller templates."
+            ),
+        }
     rendered_sha = hashlib.sha256(rendered.encode("utf-8")).hexdigest()
     out = Path(output_path)
 
@@ -216,8 +253,9 @@ def render_template(
                 mode="overwrite",
                 caller="gen-pilot:gp_render",
             )
-            return {
-                "ok": rw_result.get("ok", True),
+            rw_ok = rw_result.get("ok", True)
+            result_dict: dict[str, Any] = {
+                "ok": rw_ok,
                 "rendered_path": str(out),
                 "rendered_bytes": rendered_bytes,
                 "sha256": rendered_sha,
@@ -227,19 +265,25 @@ def render_template(
                 "compiled_path": None,
                 "compiled_bytes": None,
             }
+            if not rw_ok:
+                result_dict["error"] = rw_result.get("error", "resilient-write failed")
+            return result_dict
         except ImportError:
             pass  # fall through to built-in atomic write
 
     # Atomic write: temp file → rename
     out.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=str(out.parent), suffix=".tmp")
+    fd_closed = False
     try:
         os.write(fd, rendered.encode("utf-8"))
         os.fsync(fd)
         os.close(fd)
+        fd_closed = True
         os.replace(tmp, str(out))
     except Exception:
-        os.close(fd) if not os.get_inheritable(fd) else None
+        if not fd_closed:
+            os.close(fd)
         if os.path.exists(tmp):
             os.unlink(tmp)
         raise
@@ -302,6 +346,7 @@ def list_templates() -> dict[str, Any]:
                 "format": meta["format"],
                 "description": meta.get("description"),
                 "variables": meta.get("variables", []),
+                "schema": meta.get("schema"),
                 "created_at": meta.get("created_at"),
                 "source": "user",
             })
@@ -317,6 +362,7 @@ def list_templates() -> dict[str, Any]:
                 "format": meta["format"],
                 "description": meta.get("description"),
                 "variables": meta.get("variables", []),
+                "schema": meta.get("schema"),
                 "source": "builtin",
             })
 
@@ -398,8 +444,9 @@ TOOLS: list[Tool] = [
                     "type": "boolean",
                     "default": False,
                     "description": (
-                        "Return rendered content in response instead of "
-                        "writing to disk, for piping through rw_safe_write"
+                        "Write output via resilient-write's rw_safe_write "
+                        "for atomic writes with journaling. "
+                        "Falls back to built-in atomic write if not installed."
                     ),
                 },
             },

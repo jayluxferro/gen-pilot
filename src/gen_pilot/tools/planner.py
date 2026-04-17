@@ -1,7 +1,7 @@
 """Layer 2 — Generation Planning tools.
 
-gp_plan:   Given a target document description (format, sections, estimated size),
-           returns a chunked generation plan: ordered steps, recommended chunk sizes,
+gp_plan:   Given a target output description (format, sections, estimated size),
+           returns a generation plan: ordered steps, recommended chunk sizes,
            format selection, and template suggestion.
 gp_replan: Accepts a failed/stalled generation attempt and returns a revised plan
            (smaller chunks, simpler format, or deferred-render strategy).
@@ -9,16 +9,15 @@ gp_replan: Accepts a failed/stalled generation attempt and returns a revised pla
 
 from __future__ import annotations
 
-import hashlib
 import json
 import shutil
-import time
+import uuid
 from pathlib import Path
 from typing import Any
 
 from mcp.types import Tool
 
-from gen_pilot.tools.budget import FORMAT_MULTIPLIERS
+from gen_pilot.tools.budget import get_multipliers
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -43,13 +42,29 @@ def _plans_dir() -> Path:
 
 def _generate_plan_id() -> str:
     """Generate a unique plan ID."""
-    h = hashlib.sha256(str(time.time_ns()).encode()).hexdigest()[:8]
-    return f"plan_{h}"
+    return f"plan_{uuid.uuid4().hex[:12]}"
+
+
+def _tok(n: int) -> str:
+    """Pluralize 'token' correctly."""
+    return "1 token" if n == 1 else f"{n} tokens"
+
+
+_MAX_PLAN_FILES = 50
 
 
 def _save_plan(plan: dict[str, Any]) -> None:
     path = _plans_dir() / f"{plan['plan_id']}.json"
     path.write_text(json.dumps(plan, indent=2), encoding="utf-8")
+    _gc_plans()
+
+
+def _gc_plans() -> None:
+    """Remove oldest plan files when count exceeds _MAX_PLAN_FILES."""
+    plans = sorted(_plans_dir().glob("plan_*.json"), key=lambda p: p.stat().st_mtime)
+    excess = len(plans) - _MAX_PLAN_FILES
+    for p in plans[:excess]:
+        p.unlink(missing_ok=True)
 
 
 def _load_plan(plan_id: str) -> dict[str, Any] | None:
@@ -87,15 +102,26 @@ def _select_format_chain(target_format: str | None, content_tokens: int) -> list
         return ["json_data", "jinja2_template", "html"]
     elif target_format == "markdown":
         return ["json_data", "jinja2_template", "markdown"]
+    elif target_format == "code":
+        return ["json_data", "jinja2_template", "code"]
+    elif target_format == "json":
+        return ["json_data", "json"]
+    elif target_format == "yaml":
+        return ["json_data", "yaml"]
+    elif target_format == "text":
+        return ["json_data", "jinja2_template", "text"]
     # Default: markdown
     return ["json_data", "jinja2_template", "markdown"]
 
 
 def _infer_output_format(format_chain: list[str]) -> str:
     """Infer the intermediate output format from the chain (for multiplier lookup)."""
-    for fmt in ("latex", "markdown", "html", "python"):
+    for fmt in ("latex", "markdown", "html", "code", "json", "yaml"):
         if fmt in format_chain:
             return fmt
+    # python-docx chain entry maps to "python" multiplier
+    if any(entry.startswith("python") for entry in format_chain):
+        return "python"
     return "raw"
 
 
@@ -146,7 +172,7 @@ def _generate_steps(
         steps.append({
             "step": step_num,
             "action": "generate",
-            "description": "Generate the complete document in one shot",
+            "description": "Generate the complete output in one shot",
             "estimated_output_tokens": int(content_tokens * format_multiplier),
             "tool_hint": "Direct generation",
         })
@@ -226,7 +252,7 @@ def _generate_steps(
     steps.append({
         "step": step_num,
         "action": "assemble",
-        "description": "Assemble chunks into final document",
+        "description": "Assemble chunks into final output",
         "estimated_output_tokens": 0,
         "tool_hint": "rw_chunk_compose",
     })
@@ -246,10 +272,10 @@ def create_plan(
     available_headroom: int | None = None,
 ) -> dict[str, Any]:
     """Create a generation plan."""
-    content_tokens = estimated_content_tokens or 2000  # reasonable default
+    content_tokens = estimated_content_tokens if estimated_content_tokens is not None else 2000
     format_chain = _select_format_chain(target_format, content_tokens)
     output_fmt = _infer_output_format(format_chain)
-    multiplier = FORMAT_MULTIPLIERS.get(output_fmt, 1.0)
+    multiplier = get_multipliers().get(output_fmt, 1.0)
 
     strategy_base = _select_strategy(content_tokens, available_headroom, multiplier)
 
@@ -265,11 +291,11 @@ def create_plan(
 
     total_gen_tokens = sum(s["estimated_output_tokens"] for s in steps)
     rationale_parts = [
-        f"Content: ~{content_tokens} tokens, format: {output_fmt} ({multiplier}x multiplier)."
+        f"Content: ~{_tok(content_tokens)}, format: {output_fmt} ({multiplier}x multiplier)."
     ]
     if available_headroom is not None:
-        rationale_parts.append(f"Headroom: {available_headroom} tokens.")
-        rationale_parts.append(f"Estimated output: {total_gen_tokens} tokens.")
+        rationale_parts.append(f"Headroom: {_tok(available_headroom)}.")
+        rationale_parts.append(f"Estimated output: {_tok(total_gen_tokens)}.")
     rationale_parts.append(f"Strategy: {strategy}.")
 
     plan_id = _generate_plan_id()
@@ -278,6 +304,7 @@ def create_plan(
         "plan_id": plan_id,
         "strategy": strategy,
         "format_chain": format_chain,
+        "replan_depth": 0,
         "steps": steps,
         "rationale": " ".join(rationale_parts),
         "fallback": _generate_fallback(strategy_base, output_fmt, content_tokens),
@@ -316,24 +343,56 @@ def replan(
     if original is None:
         return {"ok": False, "error": f"Plan '{plan_id}' not found"}
 
+    MAX_REPLAN_DEPTH = 3
+    depth = original.get("replan_depth", 0) + 1
+    if depth > MAX_REPLAN_DEPTH:
+        return {
+            "ok": False,
+            "error": (
+                f"Replan depth {depth} exceeds maximum ({MAX_REPLAN_DEPTH}). "
+                "Generation appears impossible at current context pressure. "
+                "Consider compacting context, reducing output scope, or "
+                "writing content directly to disk with rw_chunk_write."
+            ),
+        }
+
     completed = set(completed_steps or [])
     orig_steps = original.get("steps", [])
     orig_strategy = original.get("strategy", "direct")
 
-    # Determine new strategy based on failure
+    # Validate completed_steps against actual plan steps
+    if orig_steps and completed:
+        max_step = max(s["step"] for s in orig_steps)
+        invalid = sorted(s for s in completed if s > max_step or s < 1)
+        if invalid:
+            return {
+                "ok": False,
+                "error": f"Invalid completed step(s) {invalid}: plan has steps 1-{max_step}",
+            }
+
+    # Determine new strategy based on failure and current strategy
+    is_direct = "direct" in orig_strategy
+    is_chunked = "chunked" in orig_strategy
+    is_deferred = orig_strategy == "deferred_render"
+
     if failure_mode == "empty_response":
-        # Downgrade: direct → chunked → deferred
-        new_strategy_base = (
-            STRATEGY_CHUNKED if "direct" in orig_strategy else STRATEGY_DEFERRED
-        )
+        # Downgrade: direct → chunked → deferred → chunked_data (last resort)
+        if is_direct:
+            new_strategy_base = STRATEGY_CHUNKED
+        elif is_chunked:
+            new_strategy_base = STRATEGY_DEFERRED
+        else:
+            # Already deferred — switch to chunked data generation
+            new_strategy_base = STRATEGY_CHUNKED
     elif failure_mode == "truncated":
-        # Keep same strategy but halve chunk size
-        new_strategy_base = STRATEGY_CHUNKED
+        # Deferred: stay deferred but chunk the data; otherwise halve chunk size
+        new_strategy_base = STRATEGY_DEFERRED if is_deferred else STRATEGY_CHUNKED
     elif failure_mode == "timeout":
-        new_strategy_base = STRATEGY_DEFERRED
+        # Already deferred and timed out: try chunked as escape
+        new_strategy_base = STRATEGY_CHUNKED if is_deferred else STRATEGY_DEFERRED
     else:
-        # tool_error or unknown — try deferred
-        new_strategy_base = STRATEGY_DEFERRED
+        # tool_error or unknown — try deferred unless already there
+        new_strategy_base = STRATEGY_CHUNKED if is_deferred else STRATEGY_DEFERRED
 
     # Estimate remaining tokens from original plan
     remaining_tokens = sum(
@@ -344,7 +403,15 @@ def replan(
 
     format_chain = original.get("format_chain", ["markdown"])
     output_fmt = _infer_output_format(format_chain)
-    multiplier = FORMAT_MULTIPLIERS.get(output_fmt, 1.0)
+    multiplier = get_multipliers().get(output_fmt, 1.0)
+
+    # Use remaining_headroom to override strategy if provided
+    if (
+        remaining_headroom is not None
+        and remaining_headroom < remaining_tokens * 0.5
+        and new_strategy_base == STRATEGY_CHUNKED
+    ):
+        new_strategy_base = STRATEGY_DEFERRED
 
     # For truncated: halve chunk size
     content_tokens = max(1000, int(remaining_tokens / multiplier))
@@ -379,13 +446,15 @@ def replan(
         "original_plan_id": plan_id,
         "strategy": strategy,
         "format_chain": format_chain,
+        "replan_depth": depth,
         "completed_steps": sorted(completed),
         "steps": new_steps,
         "rationale": (
             f"Replanning after '{failure_mode}'. "
             f"Original strategy '{orig_strategy}' → '{strategy}'. "
             f"Completed steps: {sorted(completed) if completed else 'none'}. "
-            f"Remaining output: ~{remaining_tokens} tokens."
+            f"Remaining output: ~{_tok(remaining_tokens)}. "
+            f"Replan depth: {depth}/{MAX_REPLAN_DEPTH}."
         ),
         "fallback": _generate_fallback(new_strategy_base, output_fmt, content_tokens),
     }
@@ -401,16 +470,17 @@ TOOLS: list[Tool] = [
     Tool(
         name="gp_plan",
         description=(
-            "Create an optimal generation plan for a document. "
-            "Selects strategy (direct/chunked/deferred), format chain, "
-            "and step-by-step execution instructions."
+            "Create an optimal generation plan for any output "
+            "(documents, code, data, configs). Selects strategy "
+            "(direct/chunked/deferred), format chain, and step-by-step "
+            "execution instructions."
         ),
         inputSchema={
             "type": "object",
             "properties": {
                 "description": {
                     "type": "string",
-                    "description": "What document to produce",
+                    "description": "What output to produce",
                 },
                 "sections": {
                     "type": "array",
@@ -419,7 +489,7 @@ TOOLS: list[Tool] = [
                 },
                 "target_format": {
                     "type": "string",
-                    "enum": ["pdf", "docx", "html", "markdown"],
+                    "enum": ["pdf", "docx", "html", "markdown", "code", "json", "yaml", "text"],
                     "description": "Desired output format",
                 },
                 "estimated_content_tokens": {

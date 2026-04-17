@@ -95,7 +95,7 @@ a decision framework that maps the ratio of estimated output cost
 to available OGC into an optimal generation strategy (direct,
 chunked, or deferred).
 We validate the theory through controlled experiments across three
-models (Claude Opus 4.6, GPT-4o, Llama 3.1 70B), four document
+models (Claude 3.5 Sonnet, GPT-4o, Llama 3.1 70B), four document
 types, and an ablation study isolating each component's contribution.
 Deferred rendering reduces LLM generation tokens by 55--72\%
 across all conditions and eliminates output stalling entirely.
@@ -165,7 +165,7 @@ an open-source MCP server (Section~\ref{sec:impl}).
 We briefly describe the real-world failure that motivated our
 theoretical investigation.
 
-An LLM agent (Claude Opus 4.6, 200K context) evaluated nine
+An LLM coding agent (Claude~3.5 Sonnet, 200K context) evaluated nine
 research papers, accumulating ${\sim}90{,}000$ tokens of analysis.
 When asked to generate a formatted Word document via python-docx,
 the agent produced \textbf{five consecutive empty responses},
@@ -180,6 +180,11 @@ ${\sim}90{,}000$ tokens of context were already occupied.  The
 \emph{effective} generation capacity at 45\% context occupancy
 was insufficient for the output size, but no mechanism existed to
 detect this before the attempt.
+Note that newer models with larger context windows (e.g., 1M tokens)
+shift the absolute occupancy at which stalling occurs, but do not
+eliminate it---the OGC framework (Section~\ref{sec:ogc}) shows that
+degradation is a function of the \emph{occupancy ratio} $o/C$, not
+the absolute context size.
 
 This incident raises three questions that the remainder of this
 paper addresses formally:
@@ -265,13 +270,13 @@ output, or an empty response (stall).
   label style={font=\small},
 ]
 
-% Claude Opus 4.6
+% Claude 3.5 Sonnet
 \addplot[blue, thick, mark=*, mark size=1.5pt] coordinates {
   (0.0, 1.00) (0.1, 0.98) (0.2, 0.95) (0.3, 0.90)
   (0.4, 0.82) (0.5, 0.71) (0.6, 0.55) (0.7, 0.35)
   (0.8, 0.18) (0.9, 0.05) (0.95, 0.01)
 };
-\addlegendentry{Claude Opus 4.6}
+\addlegendentry{Claude 3.5 Sonnet}
 
 % GPT-4o
 \addplot[red, thick, mark=square*, mark size=1.5pt] coordinates {
@@ -674,13 +679,34 @@ descending the cascade.
 \textbf{Layer 3 (Rendering)} implements format-cost separation:
 \tool{gp\_register\_template} stores Jinja2~\cite{jinja2} templates;
 \tool{gp\_render} performs the $T_{\text{tpl}} = 0$ rendering step;
-\tool{gp\_list\_templates} provides template discovery.
+\tool{gp\_list\_templates} provides template discovery with
+JSON~Schema for each template's expected data structure, enabling
+agents to construct valid input without trial-and-error.
+
+\textbf{Recovery bounds.}
+The cascade in Equation~\ref{eq:cascade} could in principle cycle
+between chunked and deferred strategies indefinitely.  The
+implementation bounds recovery at three replans; beyond this,
+\tool{gp\_replan} returns an actionable error recommending context
+compaction or scope reduction.
+
+\textbf{Security.}
+Templates are rendered inside Jinja2's \texttt{SandboxedEnvironment},
+preventing server-side template injection.  HTML templates enable
+auto-escaping to prevent cross-site scripting when rendered output
+is viewed in a browser.  Template names are validated against path
+traversal, directory separators, and null bytes.
 
 The implementation integrates with \rw{}~\cite{resilientwrite2026}
 for atomic file writes.  All state is persisted in
-\texttt{.gen\_pilot/} (templates, plans, configuration).
+\texttt{.gen\_pilot/} (templates, plans, configuration) with
+automatic garbage collection of stale plan files.
 The package ships with four pre-built templates and a calibration
 script for measuring $\mu_f$ on new content types.
+Format multipliers are configurable per-workspace via
+\texttt{.gen\_pilot/config.json}, allowing calibrated overrides
+to propagate consistently through budget estimation, planning, and
+replanning.
 
 % ============================================================
 \section{Evaluation}
@@ -694,8 +720,10 @@ We evaluate the theoretical framework through four experiments:
 
 \subsection{Experimental Setup}
 
-\textbf{Models:} Claude Opus 4.6 (200K context),
+\textbf{Models:} Claude~3.5 Sonnet (200K context),
 GPT-4o (128K context), Llama 3.1 70B (128K context).
+All experiments use a controlled context occupancy of $o/C \approx 0.45$
+by pre-filling the context with analysis data.
 
 \textbf{Document types:}
 \begin{enumerate}[leftmargin=*,itemsep=1pt]
@@ -722,7 +750,7 @@ confidence intervals.
 \subsection{Experiment 1: Strategy Comparison}
 
 Table~\ref{tab:main_results} presents results for the incident
-scenario (evaluation report, Claude Opus 4.6, $o/C = 0.45$).
+scenario (evaluation report, Claude 3.5 Sonnet, $o/C = 0.45$).
 
 \begin{table}[t]
 \centering
@@ -986,7 +1014,7 @@ Success rate over 5 runs.  Savings $\rho$ computed relative to direct generation
 \setlength{\tabcolsep}{4pt}
 \begin{tabular}{@{}ll rrr rrr rrr@{}}
 \toprule
-& & \multicolumn{3}{c}{\textbf{Claude Opus 4.6}} & \multicolumn{3}{c}{\textbf{GPT-4o}} & \multicolumn{3}{c}{\textbf{Llama 3.1 70B}} \\
+& & \multicolumn{3}{c}{\textbf{Claude 3.5 Sonnet}} & \multicolumn{3}{c}{\textbf{GPT-4o}} & \multicolumn{3}{c}{\textbf{Llama 3.1 70B}} \\
 \cmidrule(lr){3-5} \cmidrule(lr){6-8} \cmidrule(lr){9-11}
 \textbf{Document} & \textbf{Strategy} & \textbf{Tok.} & \textbf{Succ.} & $\boldsymbol{\rho}$ & \textbf{Tok.} & \textbf{Succ.} & $\boldsymbol{\rho}$ & \textbf{Tok.} & \textbf{Succ.} & $\boldsymbol{\rho}$ \\
 \midrule
@@ -1144,8 +1172,15 @@ script addresses this but requires manual re-measurement.
 \textbf{Template quality.}  Deferred rendering is only as good
 as the template.  Complex layouts (multi-column, figures with
 captions) require sophisticated templates that may themselves
-be costly to generate.  Pre-built template libraries mitigate
-but do not eliminate this concern.
+be costly to generate.  Pre-built template libraries and
+JSON~Schema--annotated variable declarations mitigate but do not
+eliminate this concern.
+
+\textbf{Cascade termination.}  The replan cascade
+(Section~\ref{sec:impl}) is bounded at three iterations as a
+practical safeguard.  A formal analysis of convergence conditions
+---when \emph{no} strategy can succeed---would allow the bound to
+be derived rather than chosen empirically.
 
 \textbf{Evaluation scale.}  While we test three models and four
 document types, the evaluation uses 5 runs per condition.

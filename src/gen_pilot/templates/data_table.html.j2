@@ -16,7 +16,7 @@
 </head>
 <body>
     <h1>{{ title }}</h1>
-    {% if description %}<p class="description">{{ description }}</p>{% endif %}
+    {% if description is defined and description %}<p class="description">{{ description }}</p>{% endif %}
 
     <table>
         <thead>
@@ -37,6 +37,6 @@
         </tbody>
     </table>
 
-    {% if footer %}<p class="footer">{{ footer }}</p>{% endif %}
+    {% if footer is defined and footer %}<p class="footer">{{ footer }}</p>{% endif %}
 </body>
 </html>

@@ -4,7 +4,7 @@
 
 **Author:** {{ author }}
 **Date:** {{ date }}
-{% if version %}**Version:** {{ version }}{% endif %}
+{% if version is defined and version %}**Version:** {{ version }}{% endif %}
 
 ---
 
@@ -13,7 +13,7 @@
 
 {{ section.body }}
 
-{% if section.code_blocks %}
+{% if section.code_blocks is defined and section.code_blocks %}
 {% for block in section.code_blocks %}
 ```{{ block.language }}
 {{ block.code }}
@@ -23,7 +23,7 @@
 
 {% endfor %}
 
-{% if appendix %}
+{% if appendix is defined and appendix %}
 ---
 
 ## Appendix

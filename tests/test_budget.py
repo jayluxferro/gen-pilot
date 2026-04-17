@@ -52,23 +52,47 @@ class TestGpEstimate:
         assert result["ok"] is True
         assert result["multiplier_applied"] == 1.05
 
+    def test_code_multiplier(self) -> None:
+        """Code format should apply 1.2x multiplier."""
+        result = estimate_tokens(text="def foo(x: int) -> str: pass", fmt="code")
+        assert result["ok"] is True
+        assert result["multiplier_applied"] == 1.2
+
+    def test_html_multiplier(self) -> None:
+        """HTML format should apply 1.2x multiplier."""
+        result = estimate_tokens(text="<div>Hello</div>", fmt="html")
+        assert result["ok"] is True
+        assert result["multiplier_applied"] == 1.2
+
+    def test_yaml_multiplier(self) -> None:
+        """YAML format should apply 1.05x multiplier."""
+        result = estimate_tokens(text="key: value", fmt="yaml")
+        assert result["ok"] is True
+        assert result["multiplier_applied"] == 1.05
+
+    def test_toml_multiplier(self) -> None:
+        """TOML format should apply 1.1x multiplier."""
+        result = estimate_tokens(text='[section]\nkey = "value"', fmt="toml")
+        assert result["ok"] is True
+        assert result["multiplier_applied"] == 1.1
+
 
 class TestGpBudget:
     """Tests for gp_budget headroom calculation."""
 
     def test_direct_recommendation(self) -> None:
         """Ample headroom should recommend 'direct' strategy."""
-        # 50K used out of 200K = 150K headroom = 75% → direct
-        result = compute_budget(model="claude-sonnet-4-6", conversation_tokens=50_000)
+        # 500K used out of 1M = 500K headroom = 50% → direct
+        result = compute_budget(model="claude-sonnet-4-6", conversation_tokens=500_000)
         assert result["ok"] is True
         assert result["recommendation"] == "direct"
-        assert result["estimated_headroom"] == 150_000
+        assert result["estimated_headroom"] == 500_000
         assert result["warning"] is None
 
     def test_chunk_recommendation(self) -> None:
         """Moderate headroom should recommend 'chunk' strategy."""
-        # 170K used out of 200K = 30K headroom = 15% → chunk
-        result = compute_budget(model="claude-sonnet-4-6", conversation_tokens=170_000)
+        # 850K used out of 1M = 150K headroom = 15% → chunk
+        result = compute_budget(model="claude-sonnet-4-6", conversation_tokens=850_000)
         assert result["ok"] is True
         assert result["recommendation"] == "chunk"
         assert result["suggested_chunk_size"] is not None
@@ -76,15 +100,15 @@ class TestGpBudget:
 
     def test_defer_recommendation(self) -> None:
         """Low headroom should recommend 'defer' strategy."""
-        # 184K used out of 200K = 16K headroom = 8% → defer
-        result = compute_budget(model="claude-sonnet-4-6", conversation_tokens=184_000)
+        # 920K used out of 1M = 80K headroom = 8% → defer
+        result = compute_budget(model="claude-sonnet-4-6", conversation_tokens=920_000)
         assert result["ok"] is True
         assert result["recommendation"] == "defer"
 
     def test_compact_first_recommendation(self) -> None:
         """Near-zero headroom should recommend 'compact_first'."""
-        # 195K used out of 200K = 5K headroom = 2.5% → compact_first
-        result = compute_budget(model="claude-sonnet-4-6", conversation_tokens=195_000)
+        # 970K used out of 1M = 30K headroom = 3% → compact_first
+        result = compute_budget(model="claude-sonnet-4-6", conversation_tokens=970_000)
         assert result["ok"] is True
         assert result["recommendation"] == "compact_first"
         assert result["warning"] is not None
@@ -95,7 +119,7 @@ class TestGpBudget:
         result = compute_budget(conversation_tokens=100_000)
         assert result["ok"] is True
         assert result["estimated_used"] == 100_000
-        assert result["estimated_headroom"] == 100_000
+        assert result["estimated_headroom"] == 900_000
 
     def test_no_conversation_tokens(self) -> None:
         """Without conversation_tokens, should return warning."""
@@ -107,6 +131,33 @@ class TestGpBudget:
 
     def test_headroom_never_negative(self) -> None:
         """Headroom should never go below zero."""
-        result = compute_budget(conversation_tokens=999_999)
+        result = compute_budget(conversation_tokens=9_999_999)
         assert result["ok"] is True
         assert result["estimated_headroom"] == 0
+
+    def test_negative_conversation_tokens_clamped(self) -> None:
+        """Negative conversation_tokens should be clamped to zero with a warning."""
+        result = compute_budget(conversation_tokens=-100)
+        assert result["ok"] is True
+        assert result["estimated_used"] == 0
+        assert result["estimated_headroom"] == result["context_limit"]
+        assert result["estimated_headroom"] > 0
+        assert result["warning"] is not None
+        assert "Negative" in result["warning"] or "clamped" in result["warning"].lower()
+
+    def test_unknown_model_warns(self) -> None:
+        """Unknown model should produce a warning about defaulting."""
+        result = compute_budget(model="gpt-4o", conversation_tokens=50_000)
+        assert result["ok"] is True
+        assert result["warning"] is not None
+        assert "Unknown model" in result["warning"]
+        # Unknown models default to 200K
+        assert result["context_limit"] == 200_000
+
+    def test_singular_token_grammar(self) -> None:
+        """Warning should use 'token' (singular) when headroom is 1."""
+        # Use context_limit - 1 to get exactly 1 token headroom
+        result = compute_budget(conversation_tokens=999_999)
+        assert result["ok"] is True
+        assert result["warning"] is not None
+        assert "1 token " in result["warning"]

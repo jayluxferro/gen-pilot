@@ -9,22 +9,25 @@ gp_estimate: Estimates token count for a given text or structured data blob,
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
 import tiktoken
 from mcp.types import Tool
 
+logger = logging.getLogger(__name__)
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
 MODEL_LIMITS: dict[str, int] = {
-    "claude-opus-4-6": 200_000,
-    "claude-sonnet-4-6": 200_000,
-    "claude-haiku-4-5": 200_000,
-    "claude-sonnet-4-5": 200_000,
-    "claude-opus-4-5": 200_000,
+    "claude-opus-4-6": 1_000_000,
+    "claude-sonnet-4-6": 1_000_000,
+    "claude-haiku-4-5": 1_000_000,
+    "claude-sonnet-4-5": 1_000_000,
+    "claude-opus-4-5": 1_000_000,
     "claude-3-opus": 200_000,
     "claude-3-sonnet": 200_000,
     "claude-3-haiku": 200_000,
@@ -37,7 +40,11 @@ DEFAULT_MODEL = "claude-sonnet-4-6"
 FORMAT_MULTIPLIERS: dict[str, float] = {
     "raw": 1.0,
     "markdown": 1.05,
+    "yaml": 1.05,
+    "toml": 1.1,
     "json": 1.15,
+    "code": 1.2,
+    "html": 1.2,
     "latex": 1.3,
     "python": 1.4,
 }
@@ -45,9 +52,13 @@ FORMAT_MULTIPLIERS: dict[str, float] = {
 FORMAT_NOTES: dict[str, str] = {
     "raw": "No format overhead applied",
     "markdown": "Markdown markup adds ~5% token overhead vs plain text",
+    "yaml": "YAML indentation and keys add ~5% token overhead",
+    "toml": "TOML keys and quoting add ~10% token overhead",
     "json": "JSON brackets, keys, and quoting add ~15% token overhead",
+    "code": "Code syntax (indentation, type hints, docstrings, brackets) adds ~20% token overhead",
+    "html": "HTML tags and attributes add ~20% token overhead",
     "latex": "LaTeX markup adds ~30% token overhead vs plain text",
-    "python": "python-docx API boilerplate adds ~40% token overhead",
+    "python": "python-docx format generation adds ~40% token overhead",
 }
 
 # Max safe output as fraction of headroom (conservative)
@@ -76,8 +87,8 @@ def _load_config_multipliers() -> dict[str, float]:
                 merged = dict(FORMAT_MULTIPLIERS)
                 merged.update(overrides)
                 return merged
-        except (json.JSONDecodeError, OSError):
-            pass
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning("Failed to load config multipliers from %s: %s", _CONFIG_PATH, e)
     return FORMAT_MULTIPLIERS
 
 
@@ -140,7 +151,14 @@ def compute_budget(
     conversation_tokens: int | None = None,
 ) -> dict[str, Any]:
     """Compute context budget, headroom, and generation recommendation."""
+    model_known = model in MODEL_LIMITS
     context_limit = MODEL_LIMITS.get(model, 200_000)
+
+    clamped_negative = False
+    if conversation_tokens is not None:
+        if conversation_tokens < 0:
+            clamped_negative = True
+        conversation_tokens = max(0, conversation_tokens)
 
     if conversation_tokens is None:
         return {
@@ -175,18 +193,30 @@ def compute_budget(
         recommendation = "compact_first"
         suggested_chunk_size = None
 
-    warning = None
+    token_word = "token" if estimated_headroom == 1 else "tokens"
+    warnings: list[str] = []
+    if clamped_negative:
+        warnings.append(
+            "Negative conversation_tokens was clamped to 0. "
+            "This likely indicates a bug in the caller's token counting."
+        )
+    if not model_known:
+        warnings.append(
+            f"Unknown model '{model}'; defaulting to {context_limit} token limit. "
+            "Pass a known model name for accurate recommendations."
+        )
     if headroom_ratio < DEFER_THRESHOLD:
-        warning = (
-            f"Critical: only {estimated_headroom} tokens "
+        warnings.append(
+            f"Critical: only {estimated_headroom} {token_word} "
             f"(~{headroom_ratio:.1%}) headroom remaining. "
             "Recommend compacting context before any generation."
         )
     elif headroom_ratio < CHUNK_THRESHOLD:
-        warning = (
-            f"Low headroom: {estimated_headroom} tokens (~{headroom_ratio:.1%}). "
+        warnings.append(
+            f"Low headroom: {estimated_headroom} {token_word} (~{headroom_ratio:.1%}). "
             "Use deferred rendering to avoid stalling."
         )
+    warning = " ".join(warnings) if warnings else None
 
     return {
         "ok": True,
@@ -210,7 +240,8 @@ TOOLS: list[Tool] = [
         name="gp_estimate",
         description=(
             "Estimate token count for text or structured data. "
-            "Applies format-specific multipliers (raw, json, latex, python, markdown) "
+            "Applies format-specific multipliers "
+            "(raw, markdown, yaml, toml, json, code, html, latex, python) "
             "to predict actual generation cost."
         ),
         inputSchema={
@@ -225,7 +256,10 @@ TOOLS: list[Tool] = [
                 },
                 "format": {
                     "type": "string",
-                    "enum": ["raw", "json", "latex", "python", "markdown"],
+                    "enum": [
+                        "raw", "markdown", "yaml", "toml", "json",
+                        "code", "html", "latex", "python",
+                    ],
                     "default": "raw",
                     "description": "Output format — applies format-specific multiplier",
                 },

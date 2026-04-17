@@ -2,7 +2,7 @@
 
 **Date:** {{ date }}
 **Attendees:** {{ attendees | join(", ") }}
-{% if facilitator %}**Facilitator:** {{ facilitator }}{% endif %}
+{% if facilitator is defined and facilitator %}**Facilitator:** {{ facilitator }}{% endif %}
 
 ---
 
@@ -19,7 +19,7 @@
 
 {{ item.notes }}
 
-{% if item.decisions %}
+{% if item.decisions is defined and item.decisions %}
 **Decisions:**
 {% for d in item.decisions %}
 - {{ d }}
@@ -36,7 +36,7 @@
 | {{ loop.index }} | {{ action.task }} | {{ action.owner }} | {{ action.due }} |
 {% endfor %}
 
-{% if next_meeting %}
+{% if next_meeting is defined and next_meeting %}
 ---
 
 **Next meeting:** {{ next_meeting }}

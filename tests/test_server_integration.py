@@ -91,7 +91,7 @@ class TestServerBudgetRoundTrip:
             })
             assert r["ok"] is True
             assert r["recommendation"] == "direct"
-            assert r["estimated_headroom"] == 150_000
+            assert r["estimated_headroom"] == 950_000
 
 
 # ---------------------------------------------------------------------------
@@ -198,6 +198,28 @@ class TestServerErrorHandling:
             r = await _call(session, "gp_nonexistent", {})
             assert r["ok"] is False
             assert "Unknown tool" in r["error"]
+
+    @pytest.mark.usefixtures("_isolate_state")
+    async def test_handler_exception_returns_structured_error(
+        self, tmp_path: Path
+    ) -> None:
+        """Handler exceptions should return structured error, not crash."""
+        server = create_server()
+        async with create_connected_server_and_client_session(server) as session:
+            # Register a valid template first
+            await _call(session, "gp_register_template", {
+                "name": "crash_tpl",
+                "content": "{{ x }}",
+                "format": "text",
+            })
+            # Render to an impossible path to trigger an OS error
+            r = await _call(session, "gp_render", {
+                "template": "crash_tpl",
+                "data": {"x": "hello"},
+                "output_path": "/proc/nonexistent/impossible.txt",
+            })
+            assert r["ok"] is False
+            assert "Internal error" in r["error"]
 
 
 # ---------------------------------------------------------------------------

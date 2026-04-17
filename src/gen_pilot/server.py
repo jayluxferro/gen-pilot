@@ -48,7 +48,11 @@ def create_server() -> Server:
         if mod is None:
             result = {"ok": False, "error": f"Unknown tool: {name}"}
         else:
-            result = await mod.handle_tool(name, arguments)
+            try:
+                result = await mod.handle_tool(name, arguments)
+            except Exception as exc:
+                logger.exception("Tool %s raised: %s", name, exc)
+                result = {"ok": False, "error": f"Internal error in {name}: {exc}"}
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
     return server

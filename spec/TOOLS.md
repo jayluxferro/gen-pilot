@@ -25,7 +25,7 @@ Returns the estimated context state and generation headroom.
   "context_limit": 200000,
   "estimated_used": 145000,
   "estimated_headroom": 55000,
-  "max_safe_output": 8000,
+  "max_safe_output": 33000,
   "recommendation": "chunk",
   "suggested_chunk_size": 4000,
   "warning": null
@@ -37,6 +37,10 @@ Returns the estimated context state and generation headroom.
 - `"chunk"` — headroom is tight; split output into chunks of `suggested_chunk_size`
 - `"defer"` — headroom is critically low; use deferred rendering (template + data)
 - `"compact_first"` — headroom is near-zero; recommend context compaction before proceeding
+
+**Edge cases:**
+- Negative `conversation_tokens` is clamped to 0 with a warning indicating a likely bug in the caller's token counting.
+- Unknown models default to 200,000 tokens with a warning.
 
 **Implementation notes:**
 - Token estimation uses `tiktoken` with the `cl100k_base` encoding (closest available for Claude)
@@ -57,13 +61,14 @@ Estimates the token count of a given text or structured data.
 |-------|------|----------|-------------|
 | `text` | string | Yes (or `data`) | Raw text to estimate |
 | `data` | object | Yes (or `text`) | Structured data — serialized to JSON for estimation |
-| `format` | string | `"raw"` | `"raw"`, `"json"`, `"latex"`, `"python"` — applies format-specific multipliers |
+| `format` | string | `"raw"` | `"raw"`, `"markdown"`, `"yaml"`, `"toml"`, `"json"`, `"code"`, `"html"`, `"latex"`, `"python"` — applies format-specific multipliers |
 
 **Returns:**
 ```json
 {
   "ok": true,
   "estimated_tokens": 3200,
+  "raw_tokens": 2462,
   "format": "latex",
   "multiplier_applied": 1.3,
   "note": "LaTeX markup adds ~30% token overhead vs plain text"
@@ -72,10 +77,14 @@ Estimates the token count of a given text or structured data.
 
 **Format multipliers** (empirically derived):
 - `raw`: 1.0
-- `json`: 1.15 (brackets, keys, quoting overhead)
-- `latex`: 1.3 (commands, environments, escaping)
-- `python`: 1.4 (python-docx API boilerplate)
 - `markdown`: 1.05
+- `yaml`: 1.05 (indentation and keys)
+- `toml`: 1.1 (keys and quoting)
+- `json`: 1.15 (brackets, keys, quoting overhead)
+- `code`: 1.2 (syntax, indentation, type hints, docstrings)
+- `html`: 1.2 (tags and attributes)
+- `latex`: 1.3 (commands, environments, escaping)
+- `python`: 1.4 (python-docx format generation)
 
 ---
 
@@ -83,15 +92,15 @@ Estimates the token count of a given text or structured data.
 
 ### `gp_plan`
 
-Given a document description, returns an optimal generation plan.
+Given an output description, returns an optimal generation plan.
 
 **Parameters:**
 
 | Param | Type | Required | Description |
 |-------|------|----------|-------------|
-| `description` | string | Yes | What document to produce (e.g., "14-page evaluation report with 9 sections + summary") |
+| `description` | string | Yes | What output to produce (e.g., "evaluation report with 9 sections", "Python auth module with tests") |
 | `sections` | list[string] | No | Explicit section names/titles |
-| `target_format` | string | No | Desired output format: `"pdf"`, `"docx"`, `"html"`, `"markdown"` |
+| `target_format` | string | No | Desired output format: `"pdf"`, `"docx"`, `"html"`, `"markdown"`, `"code"`, `"json"`, `"yaml"`, `"text"` |
 | `estimated_content_tokens` | int | No | How much content data the agent is holding |
 | `available_headroom` | int | No | From `gp_budget` — if omitted, plan is format-only |
 
@@ -102,6 +111,7 @@ Given a document description, returns an optimal generation plan.
   "plan_id": "plan_a1b2c3",
   "strategy": "chunked_latex",
   "format_chain": ["json_data", "jinja2_template", "latex", "pdflatex", "pdf"],
+  "replan_depth": 0,
   "steps": [
     {
       "step": 1,
@@ -173,7 +183,17 @@ Called after a generation failure. Analyzes what went wrong and produces a revis
 | `completed_steps` | list[int] | No | Which steps succeeded before failure |
 | `remaining_headroom` | int | No | Current headroom estimate |
 
-**Returns:** Same structure as `gp_plan`, with adjusted strategy (typically: smaller chunks, simpler format, or full deferred rendering).
+**Returns:** Same structure as `gp_plan`, plus `original_plan_id` and `completed_steps`. The `replan_depth` field tracks how many times the cascade has been replanned.
+
+**Depth limit:** Replanning is bounded at 3 iterations. Beyond this, `gp_replan` returns an error:
+```json
+{
+  "ok": false,
+  "error": "Replan depth 4 exceeds maximum (3). Generation appears impossible at current context pressure. Consider compacting context, reducing output scope, or writing content directly to disk with rw_chunk_write."
+}
+```
+
+**Strategy cascade on `empty_response`:** `direct` → `chunked` → `deferred` → error (bounded, no cycling).
 
 ---
 
@@ -222,6 +242,7 @@ Renders structured data through a registered template.
 | `output_path` | string | Yes | Where to write the rendered file |
 | `compile` | bool | `false` | If true and format is `latex`, auto-run `pdflatex` |
 | `compile_cmd` | string | No | Override compile command (e.g., `"xelatex"`) |
+| `use_rw` | bool | `false` | Write via resilient-write's `rw_safe_write` for atomic writes with journaling. Falls back to built-in atomic write if not installed. |
 
 **Returns:**
 ```json
@@ -230,6 +251,7 @@ Renders structured data through a registered template.
   "rendered_path": "evaluation-report.tex",
   "rendered_bytes": 25221,
   "sha256": "def456...",
+  "write_method": "atomic_rename",
   "compiled": true,
   "compiled_path": "evaluation-report.pdf",
   "compiled_bytes": 152456
@@ -237,6 +259,8 @@ Renders structured data through a registered template.
 ```
 
 **Key design point:** `gp_render` is *deterministic* — no LLM generation tokens consumed. The LLM's job is producing the small JSON data blob; the template handles all formatting.
+
+**Security:** Templates run in Jinja2's `SandboxedEnvironment` to prevent server-side template injection. HTML-format templates use `autoescape=True` to prevent XSS. Template names are validated against path traversal (`..`, `/`, `\`, null bytes).
 
 ---
 
@@ -256,7 +280,17 @@ Lists available templates.
       "format": "latex",
       "description": "Academic paper evaluation report",
       "variables": ["title", "author", "papers", "aggregate"],
-      "created_at": "2026-04-16T12:00:00Z"
+      "schema": {
+        "type": "object",
+        "required": ["title", "author", "papers"],
+        "properties": {
+          "title": {"type": "string"},
+          "author": {"type": "string"},
+          "papers": {"type": "array", "items": {"type": "object", "required": ["title", "summary"]}}
+        }
+      },
+      "created_at": "2026-04-16T12:00:00Z",
+      "source": "user"
     }
   ]
 }
