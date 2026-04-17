@@ -97,7 +97,7 @@ chunked, or deferred).
 We validate the theory through controlled experiments across three
 models (Claude 3.5 Sonnet, GPT-4o, Llama 3.1 70B), four document
 types, and an ablation study isolating each component's contribution.
-Deferred rendering reduces LLM generation tokens by 55--72\%
+Deferred rendering reduces LLM generation tokens by 48--72\%
 across all conditions and eliminates output stalling entirely.
 We instantiate the framework as \genpilot{}, an open-source MCP
 server, demonstrating that the theory translates directly into
@@ -314,9 +314,10 @@ Figure~\ref{fig:alpha} shows the measured degradation curves.
 All three models exhibit similar sigmoid-like decay, with
 $\alpha$ dropping sharply between $o/C = 0.4$ and $o/C = 0.7$.
 Critically, at the incident's context occupancy ($o/C = 0.45$),
-the effective OGC was only ${\sim}71\%$ of raw headroom for
-Claude---insufficient for the ${\sim}10{,}000$-token python-docx
-output.
+the effective OGC was only ${\sim}77\%$ of raw headroom for
+Claude, and the remaining capacity was insufficient
+for reliable generation of the ${\sim}10{,}000$-token
+python-docx output given the format overhead.
 
 \begin{proposition}[Sigmoid Approximation]
 \label{prop:sigmoid}
@@ -474,9 +475,9 @@ theoretical lower bound because of content compression.
   every node near coord/.append style={yshift=2pt},
 ]
 
-% Theoretical lower bound
+% Theoretical lower bound (0 for markdown since mu_json > mu_md)
 \addplot[fill=gray!30, draw=gray!60] coordinates {
-  (1, 17.9) (2, 11.5) (3, 11.5) (4, 17.9)
+  (1, 17.9) (2, 11.5) (3, 0) (4, 17.9)
 };
 \addlegendentry{Theoretical $\rho_{\min}$}
 
@@ -491,8 +492,10 @@ theoretical lower bound because of content compression.
 \caption{Token savings from deferred rendering.  Measured savings
 (blue) substantially exceed the theoretical lower bound (gray)
 because the LLM produces compressed structured data.  Eval.\ report
-and data report use python-docx/$\mu{=}1.4$; API docs and meeting
-notes use LaTeX/$\mu{=}1.3$.}
+and data report use python-docx ($\mu{=}1.4$); API docs use
+\LaTeX{} ($\mu{=}1.3$); meeting notes use Markdown ($\mu{=}1.05$,
+theoretical bound is zero since $\mu_{\text{json}} > \mu_{\text{md}}$,
+so all savings come from content compression).}
 \label{fig:savings}
 \end{figure}
 
@@ -605,7 +608,7 @@ when feasible, falling back to more robust ones as capacity tightens.
 ]
 
 % Defer region (largest)
-\addplot[name path=defer, orange!80, thick, mark=none] coordinates {
+\addplot[orange!80, thick, mark=none] coordinates {
   (0.0, 50) (0.1, 47) (0.2, 43) (0.3, 37)
   (0.4, 30) (0.5, 23) (0.6, 15) (0.7, 8)
   (0.8, 3) (0.9, 0.5)
@@ -613,7 +616,7 @@ when feasible, falling back to more robust ones as capacity tightens.
 \addlegendentry{Deferred max}
 
 % Chunk region  
-\addplot[name path=chunk, green!60!black, thick, dashed, mark=none] coordinates {
+\addplot[green!60!black, thick, dashed, mark=none] coordinates {
   (0.0, 42) (0.1, 39) (0.2, 35) (0.3, 30)
   (0.4, 24) (0.5, 18) (0.6, 11) (0.7, 5.5)
   (0.8, 2) (0.9, 0.3)
@@ -621,7 +624,7 @@ when feasible, falling back to more robust ones as capacity tightens.
 \addlegendentry{Chunked max ($k{=}4$)}
 
 % Direct region (smallest)
-\addplot[name path=direct, blue!80, thick, dotted, mark=none] coordinates {
+\addplot[blue!80, thick, dotted, mark=none] coordinates {
   (0.0, 33) (0.1, 31) (0.2, 28) (0.3, 23)
   (0.4, 18) (0.5, 13) (0.6, 7.5) (0.7, 3.5)
   (0.8, 1.2) (0.9, 0.1)
@@ -1162,7 +1165,11 @@ mechanics would strengthen the framework.
 \textbf{Context access.}  \genpilot{} cannot directly read the
 LLM's token counter; all OGC estimates are approximate.  Agent
 platforms exposing \texttt{context\_tokens\_used()} would enable
-exact OGC computation.
+exact OGC computation.  As a consequence, the current
+implementation approximates Equation~\ref{eq:cascade} using
+raw headroom ratios rather than the $\alpha$-degraded
+$\ogceff$, since computing $\alpha$ requires knowing the
+true context occupancy.
 
 \textbf{Multiplier stability.}  Format multipliers are measured
 per-document-type and may shift with content characteristics
@@ -1212,9 +1219,10 @@ three contributions:
     strategy.
 \end{enumerate}
 
-Across three models, four document types, and 60 experimental
-runs, deferred rendering achieved \textbf{100\% success rate}
-while reducing generation tokens by \textbf{55--72\%}.  The
+Across three models, four document types, and 180 experimental
+runs (60 per strategy), deferred rendering achieved
+\textbf{100\% success rate} while reducing generation tokens by
+\textbf{48--72\%}.  The
 ablation study shows that OGC and format-cost separation are each
 independently essential, and that the framework is model-agnostic.
 
