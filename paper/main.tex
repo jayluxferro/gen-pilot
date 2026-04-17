@@ -63,12 +63,12 @@
 Output Generation Capacity and Format-Cost Separation\\
 for LLM Document Synthesis}
 \author{%
-Justice Owusu Agyemang$^{1,2,3}$\thanks{\texttt{jay@sperixlabs.org}},\quad
-Jerry John Kponyo$^{3}$,\quad
-Elliot Amponsah$^{3}$,\\
-Godfred Manu Addo Boakye$^{3}$,\quad
-Kwame Opuni-Boachie Obour Agyekum$^{2}$\\[4pt]
-{\small $^1$Sperix Labs \qquad $^2$VIA Cybersecurity Lab, KNUST \qquad $^3$QAT Lab, KNUST}%
+Justice Owusu Agyemang$^{1,2}$\thanks{\texttt{jay@sperixlabs.org}},\quad
+Michael Agyare$^{3}$,\quad
+Miriam Kobbinah$^{4}$,\\
+Nathaniel Agbugblah$^{2}$,\quad
+Prosper Addo$^{2}$\\[4pt]
+{\small $^1$Sperix Labs \qquad $^2$VIA Cybersecurity Lab, KNUST \qquad $^3$GCTU, Ghana\qquad $^4$NCA, Ghana}%
 }
 \date{April 2026}
 
@@ -82,15 +82,15 @@ we term \emph{output stalling}: the agent silently produces empty
 responses when attempting to generate large, format-heavy documents.
 We present a theoretical framework that explains and prevents this
 failure through three contributions.
-\textbf{(1)}~We introduce \emph{Output Generation Capacity} (OGC),
+\textbf{(1)} We introduce \emph{Output Generation Capacity} (OGC),
 a formal measure of an agent's effective ability to produce output
 given its current context state---distinct from and empirically
 smaller than the raw context window.
-\textbf{(2)}~We prove a \emph{Format-Cost Separation Theorem}
+\textbf{(2)} We prove a \emph{Format-Cost Separation Theorem}
 showing that deferred template rendering is always at least as
 token-efficient as direct generation for any format with overhead
 multiplier $\mu_f > 1$, and derive tight bounds on the savings.
-\textbf{(3)}~We formalize \emph{Adaptive Strategy Selection},
+\textbf{(3)} We formalize \emph{Adaptive Strategy Selection},
 a decision framework that maps the ratio of estimated output cost
 to available OGC into an optimal generation strategy (direct,
 chunked, or deferred).
