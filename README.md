@@ -69,6 +69,72 @@ Add to your Claude Code MCP config:
 }
 ```
 
+## Transports
+
+gen-pilot supports three transport modes via the `--transport` flag.
+
+### stdio (default)
+
+Standard MCP stdio transport — used by Claude Desktop, Claude Code, and the MCP CLI.
+
+```bash
+gen-pilot
+# or explicitly:
+gen-pilot --transport stdio
+```
+
+### SSE (Server-Sent Events)
+
+Classic HTTP + SSE transport. Exposes two endpoints:
+- `GET /sse` — clients open the SSE stream here
+- `POST /messages/` — clients POST messages here
+
+```bash
+gen-pilot --transport sse
+gen-pilot --transport sse --host 0.0.0.0 --port 9000
+```
+
+MCP config for SSE:
+
+```json
+{
+  "mcpServers": {
+    "gen-pilot": {
+      "url": "http://127.0.0.1:8000/sse"
+    }
+  }
+}
+```
+
+### Streamable HTTP
+
+Modern MCP Streamable HTTP transport (MCP spec ≥ 2025-03-26). Single endpoint at `/mcp`.
+
+```bash
+gen-pilot --transport streamable-http
+gen-pilot --transport streamable-http --host 0.0.0.0 --port 9000
+```
+
+MCP config for Streamable HTTP:
+
+```json
+{
+  "mcpServers": {
+    "gen-pilot": {
+      "url": "http://127.0.0.1:8000/mcp"
+    }
+  }
+}
+```
+
+### HTTP transport dependencies
+
+SSE and Streamable HTTP require `starlette` and `uvicorn`:
+
+```bash
+uv pip install "gen-pilot[http]"
+```
+
 ## Development
 
 ```bash

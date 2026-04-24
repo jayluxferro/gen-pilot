@@ -349,6 +349,10 @@ dev = [
     { name = "pytest-cov" },
     { name = "ruff" },
 ]
+http = [
+    { name = "starlette" },
+    { name = "uvicorn" },
+]
 rw = [
     { name = "resilient-write" },
 ]
@@ -373,9 +377,11 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "resilient-write", marker = "extra == 'rw'", specifier = ">=0.2.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4" },
+    { name = "starlette", marker = "extra == 'http'", specifier = ">=0.27" },
     { name = "tiktoken", specifier = ">=0.7" },
+    { name = "uvicorn", marker = "extra == 'http'", specifier = ">=0.29" },
 ]
-provides-extras = ["rw", "dev"]
+provides-extras = ["rw", "http", "dev"]
 
 [package.metadata.requires-dev]
 dev = [

@@ -8,11 +8,18 @@ Tools are organized into three layers:
 Each layer module exports:
   TOOLS: list[Tool]                          — tool definitions
   handle_tool(name, arguments) -> dict       — async handler
+
+Transport modes (--transport flag):
+  stdio            — default, stdin/stdout (for Claude Desktop / MCP CLI)
+  sse              — HTTP + Server-Sent Events on /sse and /messages/
+  streamable-http  — MCP Streamable HTTP on /mcp
 """
 
 from __future__ import annotations
 
+import argparse
 import asyncio
+import contextlib
 import json
 import logging
 from typing import Any
@@ -58,15 +65,121 @@ def create_server() -> Server:
     return server
 
 
-def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(name)s %(levelname)s %(message)s")
-    server = create_server()
+# ---------------------------------------------------------------------------
+# Transport: SSE (GET /sse  +  POST /messages/)
+# ---------------------------------------------------------------------------
 
+def _run_sse(server: Server, host: str, port: int) -> None:
+    from mcp.server.sse import SseServerTransport
+    from starlette.applications import Starlette
+    from starlette.requests import Request
+    from starlette.routing import Mount, Route
+
+    import uvicorn
+
+    sse_transport = SseServerTransport("/messages/")
+
+    async def handle_sse(request: Request) -> None:  # type: ignore[return]
+        async with sse_transport.connect_sse(
+            request.scope, request.receive, request._send  # type: ignore[attr-defined]
+        ) as (read_stream, write_stream):
+            await server.run(
+                read_stream, write_stream, server.create_initialization_options()
+            )
+
+    app = Starlette(
+        routes=[
+            Route("/sse", endpoint=handle_sse),
+            Mount("/messages/", app=sse_transport.handle_post_message),
+        ]
+    )
+
+    logger.info("SSE transport: http://%s:%d/sse", host, port)
+    uvicorn.run(app, host=host, port=port)
+
+
+# ---------------------------------------------------------------------------
+# Transport: Streamable HTTP (POST/GET /mcp)
+# ---------------------------------------------------------------------------
+
+def _run_streamable_http(server: Server, host: str, port: int) -> None:
+    from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+    from starlette.applications import Starlette
+    from starlette.routing import Mount
+
+    import uvicorn
+
+    session_manager = StreamableHTTPSessionManager(
+        app=server,
+        json_response=False,
+        stateless=False,
+    )
+
+    @contextlib.asynccontextmanager  # type: ignore[arg-type]
+    async def lifespan(app: Starlette):  # type: ignore[misc]
+        async with session_manager.run():
+            yield
+
+    app = Starlette(
+        lifespan=lifespan,
+        routes=[
+            Mount("/mcp", app=session_manager.handle_request),
+        ],
+    )
+
+    logger.info("Streamable-HTTP transport: http://%s:%d/mcp", host, port)
+    uvicorn.run(app, host=host, port=port)
+
+
+# ---------------------------------------------------------------------------
+# Transport: stdio (default)
+# ---------------------------------------------------------------------------
+
+def _run_stdio(server: Server) -> None:
     async def _run() -> None:
         async with stdio_server() as (read_stream, write_stream):
             await server.run(read_stream, write_stream, server.create_initialization_options())
 
     asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        prog="gen-pilot",
+        description="gen-pilot MCP server",
+    )
+    parser.add_argument(
+        "--transport",
+        choices=["stdio", "sse", "streamable-http"],
+        default="stdio",
+        help="Transport mode (default: stdio)",
+    )
+    parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Bind host for HTTP transports (default: 127.0.0.1)",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8000,
+        help="Bind port for HTTP transports (default: 8000)",
+    )
+    args = parser.parse_args()
+
+    logging.basicConfig(level=logging.INFO, format="%(name)s %(levelname)s %(message)s")
+    server = create_server()
+
+    if args.transport == "sse":
+        _run_sse(server, args.host, args.port)
+    elif args.transport == "streamable-http":
+        _run_streamable_http(server, args.host, args.port)
+    else:
+        _run_stdio(server)
 
 
 if __name__ == "__main__":
