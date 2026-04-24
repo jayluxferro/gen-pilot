@@ -22,8 +22,8 @@ import asyncio
 import contextlib
 import json
 import logging
-from typing import Any
 from collections.abc import AsyncGenerator
+from typing import Any
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
@@ -81,7 +81,7 @@ def _run_sse(server: Server, host: str, port: int) -> None:
 
     async def handle_sse(request: Request) -> None:
         async with sse_transport.connect_sse(
-            request.scope, request.receive, request._send
+                request.scope, request.receive, request._send
         ) as (read_stream, write_stream):
             await server.run(
                 read_stream, write_stream, server.create_initialization_options()
