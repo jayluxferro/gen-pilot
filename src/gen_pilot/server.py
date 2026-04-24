@@ -22,7 +22,7 @@ import asyncio
 import contextlib
 import json
 import logging
-from typing import Any
+from typing import Any, AsyncGenerator
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
@@ -114,7 +114,7 @@ def _run_streamable_http(server: Server, host: str, port: int) -> None:
     )
 
     @contextlib.asynccontextmanager
-    async def lifespan(app: Starlette):
+    async def lifespan(app: Starlette) -> AsyncGenerator[None, Any]:
         async with session_manager.run():
             yield
 
