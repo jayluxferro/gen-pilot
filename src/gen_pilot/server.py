@@ -78,9 +78,9 @@ def _run_sse(server: Server, host: str, port: int) -> None:
 
     sse_transport = SseServerTransport("/messages/")
 
-    async def handle_sse(request: Request) -> None:  # type: ignore[return]
+    async def handle_sse(request: Request) -> None:
         async with sse_transport.connect_sse(
-            request.scope, request.receive, request._send  # type: ignore[attr-defined]
+            request.scope, request.receive, request._send
         ) as (read_stream, write_stream):
             await server.run(
                 read_stream, write_stream, server.create_initialization_options()
@@ -113,8 +113,8 @@ def _run_streamable_http(server: Server, host: str, port: int) -> None:
         stateless=False,
     )
 
-    @contextlib.asynccontextmanager  # type: ignore[arg-type]
-    async def lifespan(app: Starlette):  # type: ignore[misc]
+    @contextlib.asynccontextmanager
+    async def lifespan(app: Starlette):
         async with session_manager.run():
             yield
 
