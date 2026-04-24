@@ -22,7 +22,8 @@ import asyncio
 import contextlib
 import json
 import logging
-from typing import Any, AsyncGenerator
+from typing import Any
+from collections.abc import AsyncGenerator
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
