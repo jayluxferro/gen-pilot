@@ -70,12 +70,11 @@ def create_server() -> Server:
 # ---------------------------------------------------------------------------
 
 def _run_sse(server: Server, host: str, port: int) -> None:
+    import uvicorn
     from mcp.server.sse import SseServerTransport
     from starlette.applications import Starlette
     from starlette.requests import Request
     from starlette.routing import Mount, Route
-
-    import uvicorn
 
     sse_transport = SseServerTransport("/messages/")
 
@@ -103,11 +102,10 @@ def _run_sse(server: Server, host: str, port: int) -> None:
 # ---------------------------------------------------------------------------
 
 def _run_streamable_http(server: Server, host: str, port: int) -> None:
+    import uvicorn
     from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
     from starlette.applications import Starlette
     from starlette.routing import Mount
-
-    import uvicorn
 
     session_manager = StreamableHTTPSessionManager(
         app=server,
